@@ -150,9 +150,9 @@ impl<W: Write> BinXmlOutput for XmlOutput<W> {
 
     fn visit_start_of_stream(&mut self) -> SerializationResult<()> {
         trace!("visit_start_of_stream");
-        let event = BytesDecl::new("1.0", Some("utf-8"), None);
+        // let event = BytesDecl::new("1.0", Some("utf-8"), None);
 
-        self.writer.write_event(Event::Decl(event))?;
+        // self.writer.write_event(Event::Decl(event))?;
 
         Ok(())
     }
