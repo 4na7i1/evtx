@@ -1,6 +1,7 @@
 #![allow(clippy::upper_case_acronyms)]
 
 use anyhow::{bail, format_err, Context, Result};
+use chrono::{DateTime, Local, TimeZone, Utc};
 use clap::{AppSettings, Arg, ArgMatches, Command};
 use dialoguer::Confirm;
 use indoc::indoc;
@@ -43,6 +44,8 @@ struct EvtxDump {
     stop_after_error: bool,
     /// When set, only the specified events (offseted reltaive to file) will be outputted.
     ranges: Option<Ranges>,
+    start_time: Option<DateTime<Utc>>,
+    end_time: Option<DateTime<Utc>>,
 }
 
 impl EvtxDump {
@@ -142,6 +145,36 @@ impl EvtxDump {
             Box::new(BufWriter::new(io::stdout()))
         };
 
+        // let start_time = matches.value_of("start-time").map(|s: &str| {
+        //     DateTime::parse_from_str(s, "%Y/%m/%d %H:%M:%S")
+        //         .unwrap_or_else(|_| Utc::now().into())
+        //         .with_timezone(&Utc)
+        // });
+
+        let start_time = matches.value_of("start-time").and_then(|s: &str| {
+            match Local.datetime_from_str(s, "%Y/%m/%d %H:%M:%S") {
+                Ok(dt) => Some(dt.with_timezone(&Utc)),
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        });
+        
+        let end_time = matches.value_of("end-time").and_then(|s: &str| {
+            match Local.datetime_from_str(s, "%Y/%m/%d %H:%M:%S") {
+                Ok(dt) => Some(dt.with_timezone(&Utc)),
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        });
+        
+
+        println!("Start Time: {:?}", start_time);
+        println!("End Time: {:?}", end_time);
+
         Ok(EvtxDump {
             parser_settings: ParserSettings::new()
                 .num_threads(num_threads)
@@ -156,6 +189,8 @@ impl EvtxDump {
             verbosity_level,
             stop_after_error,
             ranges: event_ranges,
+            start_time: start_time.or(None),
+            end_time: end_time.or(None),
         })
     }
 
@@ -233,6 +268,18 @@ impl EvtxDump {
     fn dump_record(&mut self, record: EvtxResult<SerializedEvtxRecord<String>>) -> Result<()> {
         match record.with_context(|| "Failed to dump the next record.") {
             Ok(r) => {
+                // 時間フィルタリング
+                if let Some(start_time) = self.start_time {
+                    if r.timestamp < start_time {
+                        return Ok(());
+                    }
+                }
+                if let Some(end_time) = self.end_time {
+                    if r.timestamp > end_time {
+                        return Ok(());
+                    }
+                }
+
                 let range_filter = if let Some(ranges) = &self.ranges {
                     ranges.contains(&(r.event_record_id as usize))
                 } else {
@@ -458,7 +505,20 @@ fn main() -> Result<()> {
                 -vv  - debug
                 -vvv - trace
             NOTE: trace output is only available in debug builds, as it is extremely verbose."#))
-        ).get_matches();
+        )
+        .arg(
+            Arg::with_name("start-time")
+                .long("--start-time")
+                .takes_value(true)
+                .help("Specify the start time for filtering (e.g., '2023-01-01T00:00:00Z')"),
+        )
+        .arg(
+            Arg::with_name("end-time")
+                .long("--end-time")
+                .takes_value(true)
+                .help("Specify the end time for filtering (e.g., '2023-01-02T00:00:00Z')"),
+        )
+        .get_matches();
 
     EvtxDump::from_cli_matches(&matches)?.run()?;
 
