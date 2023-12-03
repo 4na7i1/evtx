@@ -262,7 +262,6 @@ impl JsonOutput {
                 message: "Invalid stream, EOF reached before closing all attributes".to_string(),
             });
         }
-
         Ok(self.map)
     }
 }
