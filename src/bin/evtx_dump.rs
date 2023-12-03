@@ -11,6 +11,7 @@ use encoding::types::Encoding;
 use evtx::err::Result as EvtxResult;
 use evtx::{EvtxParser, ParserSettings, SerializedEvtxRecord};
 use log::Level;
+use std::cmp::min;
 use std::fs::{self, File};
 use std::io::{self, BufWriter, Write};
 use std::ops::RangeInclusive;
@@ -46,6 +47,7 @@ struct EvtxDump {
     ranges: Option<Ranges>,
     start_time: Option<DateTime<Utc>>,
     end_time: Option<DateTime<Utc>>,
+    oldest_timestamp: Option<DateTime<Utc>>,
 }
 
 impl EvtxDump {
@@ -160,7 +162,7 @@ impl EvtxDump {
                 }
             }
         });
-        
+
         let end_time = matches.value_of("end-time").and_then(|s: &str| {
             match Local.datetime_from_str(s, "%Y/%m/%d %H:%M:%S") {
                 Ok(dt) => Some(dt.with_timezone(&Utc)),
@@ -170,10 +172,13 @@ impl EvtxDump {
                 }
             }
         });
-        
+        let oldest_timestamp = None;
 
-        println!("Start Time: {:?}", start_time);
-        println!("End Time: {:?}", end_time);
+        if let Some(level) = verbosity_level {
+            println!("Start Time: {:?}", start_time);
+            println!("End Time: {:?}", end_time);
+        }
+
 
         Ok(EvtxDump {
             parser_settings: ParserSettings::new()
@@ -191,6 +196,7 @@ impl EvtxDump {
             ranges: event_ranges,
             start_time: start_time.or(None),
             end_time: end_time.or(None),
+            oldest_timestamp,
         })
     }
 
@@ -216,6 +222,13 @@ impl EvtxDump {
                 }
             }
         };
+                
+        
+        if let Some(oldest_timestamp) = self.oldest_timestamp {
+            println!("Oldest Timestamp: {}", oldest_timestamp);
+        } else {
+            println!("No matching records found within the specified time range.");
+        }
 
         Ok(())
     }
@@ -268,7 +281,7 @@ impl EvtxDump {
     fn dump_record(&mut self, record: EvtxResult<SerializedEvtxRecord<String>>) -> Result<()> {
         match record.with_context(|| "Failed to dump the next record.") {
             Ok(r) => {
-                // 時間フィルタリング
+                // time filtering
                 if let Some(start_time) = self.start_time {
                     if r.timestamp < start_time {
                         return Ok(());
@@ -278,6 +291,12 @@ impl EvtxDump {
                     if r.timestamp > end_time {
                         return Ok(());
                     }
+                }
+                // get oldest time
+                if let Some(oldest) = self.oldest_timestamp {
+                    self.oldest_timestamp = Some(min(oldest, r.timestamp));
+                } else {
+                    self.oldest_timestamp = Some(r.timestamp);
                 }
 
                 let range_filter = if let Some(ranges) = &self.ranges {
